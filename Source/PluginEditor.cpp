@@ -3,44 +3,13 @@
 namespace
 {
     constexpr float W = 1280.0f, H = 720.0f;
-    const Rectangle<float> canvas (250.0f, 170.0f, 780.0f, 330.0f);   // the picture/visualizer window
-
-    ColourGradient chrome (float x, float y, float h)
-    {
-        ColourGradient g (Colour (0xfff2f2f2), x, y, Colour (0xff2b2b2b), x, y + h, false);
-        g.addColour (0.45, Colour (0xff9c9c9c));
-        g.addColour (0.55, Colour (0xff555555));
-        return g;
-    }
-
-    void drawCrown (Graphics& g, float x0, float y0, float w, float h, Colour gem)
-    {
-        const float xs[5] = { 0.0f, 0.25f, 0.5f, 0.75f, 1.0f };
-        const float ys[5] = { 0.25f, 0.10f, 0.0f, 0.10f, 0.25f };
-        Path p;
-        p.startNewSubPath (x0, y0 + h);
-        for (int i = 0; i < 5; ++i)
-        {
-            p.lineTo (x0 + w * xs[i], y0 + h * ys[i]);
-            if (i < 4) p.lineTo (x0 + w * (xs[i] + 0.125f), y0 + h * 0.55f);
-        }
-        p.lineTo (x0 + w, y0 + h);
-        p.closeSubPath();
-
-        g.setGradientFill (chrome (y0, y0, h));
-        g.fillPath (p);
-        g.setColour (Colours::white.withAlpha (0.85f));
-        g.strokePath (p, PathStrokeType (1.5f));
-        g.setColour (gem);
-        for (int i = 0; i < 5; ++i)
-            g.fillEllipse (x0 + w * xs[i] - 4.0f, y0 + h * ys[i] - 2.0f, 8.0f, 8.0f);
-    }
-
     bool isBlackKey (int n) { const int k = n % 12; return k == 1 || k == 3 || k == 6 || k == 8 || k == 10; }
 }
 
 CBEditor::CBEditor (CBProcessor& p) : AudioProcessorEditor (&p), proc (p)
 {
+    screenScale = jlimit (0.8f, 1.05f, proc.screenScale.load());
+    layout();
     for (int i = 0; i < numCols; ++i) resetCol (i, true);
 
     skinFolder = File::getSpecialLocation (File::userDocumentsDirectory)
@@ -65,10 +34,61 @@ void CBEditor::resized()
     proc.uiScale = scale;
 }
 
-void CBEditor::stepSize (float factor)           // the in-plugin  -  /  +  buttons
+// Positions the visualizer screen, the control strip under it and the keyboard.
+// The screen is anchored at the top centre; the strip and keys follow its bottom edge.
+void CBEditor::layout()
+{
+    const float cw = 880.0f * screenScale, ch = 495.0f * screenScale;      // exactly 16:9, so a 16:9 picture fits with no bars and no crop
+    canvas = Rectangle<float> (W * 0.5f - cw * 0.5f, 22.0f, cw, ch);
+
+    stripY = canvas.getBottom() + 14.0f;
+    kbY    = stripY + 56.0f;
+    kbH    = jlimit (30.0f, 110.0f, H - kbY - 8.0f);
+    strip  = Rectangle<float> (canvas.getX(), stripY, cw, 50.0f);
+
+    const float widths[7] = { 96.0f, 80.0f, 90.0f, 64.0f, 34.0f, 64.0f, 64.0f };
+    float total = 0.0f;
+    for (float w : widths) total += w;
+    const float gap = (cw - total) / 8.0f;
+    float x = canvas.getX() + gap;
+    for (int i = 0; i < 7; ++i)
+    {
+        grp[i] = Rectangle<float> (x, stripY, widths[i], 50.0f);
+        x += widths[i] + gap;
+    }
+
+    const float by = stripY + 17.0f, bh = 26.0f;
+    btnOn         = Rectangle<float> (grp[0].getX(),          by, 46.0f, bh);
+    btnOff        = Rectangle<float> (grp[0].getX() + 50.0f,  by, 46.0f, bh);
+    rMeter        = Rectangle<float> (grp[1].getX(),          by, 80.0f, bh);
+    rSpec         = Rectangle<float> (grp[2].getX(),          by, 90.0f, bh);
+    btnPrev       = Rectangle<float> (grp[3].getX(),          by, 30.0f, bh);
+    btnNext       = Rectangle<float> (grp[3].getX() + 34.0f,  by, 30.0f, bh);
+    btnDice       = Rectangle<float> (grp[4].getX() + 3.0f,   by - 1.0f, 28.0f, 28.0f);
+    btnMinus      = Rectangle<float> (grp[5].getX(),          by, 30.0f, bh);
+    btnPlus       = Rectangle<float> (grp[5].getX() + 34.0f,  by, 30.0f, bh);
+    btnScaleMinus = Rectangle<float> (grp[6].getX(),          by, 30.0f, bh);
+    btnScalePlus  = Rectangle<float> (grp[6].getX() + 34.0f,  by, 30.0f, bh);
+
+    const float cx = canvas.getX() + 14.0f, cy = canvas.getY() + 12.0f;
+    chipMatrix = Rectangle<float> (cx,           cy, 58.0f, 18.0f);
+    chipStars  = Rectangle<float> (cx + 62.0f,   cy, 58.0f, 18.0f);
+    chipCar    = Rectangle<float> (cx + 124.0f,  cy, 58.0f, 18.0f);
+    chipWarp   = Rectangle<float> (cx + 186.0f,  cy, 58.0f, 18.0f);
+    chipFit    = Rectangle<float> (cx + 248.0f,  cy, 58.0f, 18.0f);
+}
+
+void CBEditor::stepSize (float factor)           // the  -  /  +  buttons: whole plugin window
 {
     const int w = jlimit (640, 1920, roundToInt (getWidth() * factor));
     setSize (w, roundToInt (w * 9.0f / 16.0f));
+}
+
+void CBEditor::stepScreen (float delta)          // the screen  -  /  +  buttons: visualizer only
+{
+    screenScale = jlimit (0.8f, 1.05f, screenScale + delta);
+    proc.screenScale = screenScale;
+    layout();
 }
 
 void CBEditor::resetCol (int i, bool scatter)
@@ -109,17 +129,20 @@ void CBEditor::randomize()
 void CBEditor::mouseDown (const MouseEvent& e)
 {
     const auto pt = e.position / scale;
-    if      (chipMatrix.contains (pt)) showMatrix = ! showMatrix;
-    else if (chipStars.contains (pt))  showStars  = ! showStars;
-    else if (chipCar.contains (pt))    showCar    = ! showCar;
-    else if (chipWarp.contains (pt))   showWarp   = ! showWarp;
-    else if (btnOn.contains (pt))    *proc.vfxOn = true;
-    else if (btnOff.contains (pt))   *proc.vfxOn = false;
-    else if (btnPrev.contains (pt))  stepSkin (-1);
-    else if (btnNext.contains (pt))  stepSkin (1);
-    else if (btnDice.contains (pt))  randomize();
-    else if (btnMinus.contains (pt)) stepSize (0.9f);
-    else if (btnPlus.contains (pt))  stepSize (1.1f);
+    if      (chipMatrix.contains (pt))    showMatrix = ! showMatrix;
+    else if (chipStars.contains (pt))     showStars  = ! showStars;
+    else if (chipCar.contains (pt))       showCar    = ! showCar;
+    else if (chipWarp.contains (pt))      showWarp   = ! showWarp;
+    else if (chipFit.contains (pt))       fitMode    = (fitMode + 1) % 3;
+    else if (btnOn.contains (pt))         *proc.vfxOn = true;
+    else if (btnOff.contains (pt))        *proc.vfxOn = false;
+    else if (btnPrev.contains (pt))       stepSkin (-1);
+    else if (btnNext.contains (pt))       stepSkin (1);
+    else if (btnDice.contains (pt))       randomize();
+    else if (btnMinus.contains (pt))      stepSize (0.9f);
+    else if (btnPlus.contains (pt))       stepSize (1.1f);
+    else if (btnScaleMinus.contains (pt)) stepScreen (-0.05f);
+    else if (btnScalePlus.contains (pt))  stepScreen (0.05f);
 }
 
 // ---------------------------------------------------------------- audio analysis + motion
@@ -178,7 +201,8 @@ void CBEditor::timerCallback()
             for (int i = 0; i < 5; ++i)
             {
                 Dust d;
-                d.p = { canvas.getCentreX() + 90.0f + rng.nextFloat() * 20.0f, canvas.getBottom() - 24.0f };
+                d.p = { canvas.getCentreX() + (90.0f + rng.nextFloat() * 20.0f) * carScale(),
+                        canvas.getBottom() - 24.0f * carScale() };
                 d.v = { (rng.nextFloat() - 0.3f) * 3.0f, -rng.nextFloat() * 1.5f };
                 d.r = 4.0f + rng.nextFloat() * 4.0f;
                 dust.add (d);
@@ -232,17 +256,17 @@ void CBEditor::paint (Graphics& g)
                                        Colours::black, 0.0f, 0.0f, true));
     g.fillRect (0.0f, 0.0f, W, H);
 
+    // towers first: they are straight, fill the side space, and the screen
+    // is drawn over their inner edges so they stick out from behind it
+    const float shake = vfx ? bassEnv * 3.0f : 0.0f;
+    const float exc   = vfx ? coneX : 0.0f;
+    drawTower (g, { 112.0f, 360.0f },  210.0f, 692.0f, exc, shake);
+    drawTower (g, { 1168.0f, 360.0f }, 210.0f, 692.0f, exc, shake);
+
     drawCanvas (g, vfx);
     drawFrame (g);
     drawPanels (g);
-    drawTransport (g);
     drawKeyboard (g);
-
-    // towers last so they overlap the frame edges, tilted outward
-    const float shake = vfx ? bassEnv * 3.0f : 0.0f;
-    const float exc   = vfx ? coneX : 0.0f;
-    drawTower (g, { 118.0f, 250.0f },  180.0f, 366.0f, -7.0f, exc, shake);
-    drawTower (g, { 1162.0f, 250.0f }, 180.0f, 366.0f,  7.0f, exc, shake);
 }
 
 void CBEditor::drawCanvas (Graphics& g, bool vfx)
@@ -252,35 +276,48 @@ void CBEditor::drawCanvas (Graphics& g, bool vfx)
     g.saveState();
     g.reduceClipRegion (clip);
 
-    // picture / skin (cover-fit). Without a skin, a dark gradient is shown.
+    g.setGradientFill (ColourGradient (accent.withAlpha (0.45f), canvas.getCentreX(), canvas.getBottom(),
+                                       Colour (0xff050505), canvas.getCentreX(), canvas.getY(), false));
+    g.fillRect (canvas);                                    // backdrop (shows around a fitted picture)
+
     if (skin.isValid())
     {
-        const float ir = (float) skin.getWidth() / (float) skin.getHeight();
-        const float cr = canvas.getWidth() / canvas.getHeight();
-        int sw = skin.getWidth(), sh = skin.getHeight();
-        if (ir > cr) sw = roundToInt (sh * cr); else sh = roundToInt (sw / cr);
-        const int sx = (skin.getWidth() - sw) / 2, sy = (skin.getHeight() - sh) / 2;
-        if (vfx && showWarp && bassEnv > 0.02f)       // picture bends and sways with the bass
+        const int iw = skin.getWidth(), ih = skin.getHeight();
+        Rectangle<int> dst = canvas.toNearestInt();
+        int sx = 0, sy = 0, sw = iw, sh = ih;
+
+        if (fitMode == 0)                                   // whole picture visible
         {
-            const int N = 22, stripH = 15;            // 22 * 15 = 330 = canvas height
-            const int ex = 6 + (int) (14.0f * bassEnv);
+            const float k = jmin (canvas.getWidth() / (float) iw, canvas.getHeight() / (float) ih);
+            dst = Rectangle<int> (roundToInt ((float) iw * k), roundToInt ((float) ih * k))
+                      .withCentre (canvas.getCentre().toInt());
+        }
+        else if (fitMode == 1)                              // fill the screen, crop the edges
+        {
+            const float ir = (float) iw / (float) ih, cr = canvas.getWidth() / canvas.getHeight();
+            if (ir > cr) sw = roundToInt ((float) sh * cr); else sh = roundToInt ((float) sw / cr);
+            sx = (iw - sw) / 2;
+            sy = (ih - sh) / 2;
+        }
+
+        if (vfx && showWarp && bassEnv > 0.02f)             // picture bends and sways with the bass
+        {
+            const int N = 24, ex = 6 + (int) (14.0f * bassEnv);
             for (int i = 0; i < N; ++i)
             {
-                const int sy0 = sy + (i * sh) / N, sy1 = sy + ((i + 1) * sh) / N;
+                const int d0 = dst.getY() + (i * dst.getHeight()) / N;
+                const int d1 = dst.getY() + ((i + 1) * dst.getHeight()) / N;
+                const int s0 = sy + (i * sh) / N, s1 = sy + ((i + 1) * sh) / N;
                 const int off = (int) (std::sin (phase + (float) i * 0.55f) * 7.0f * bassEnv);
-                g.drawImage (skin, (int) canvas.getX() - ex + off, (int) canvas.getY() + i * stripH,
-                             (int) canvas.getWidth() + 2 * ex, stripH, sx, sy0, sw, jmax (1, sy1 - sy0));
+                g.drawImage (skin, dst.getX() - ex + off, d0, dst.getWidth() + 2 * ex, jmax (1, d1 - d0),
+                             sx, s0, sw, jmax (1, s1 - s0));
             }
         }
         else
-            g.drawImage (skin, (int) canvas.getX(), (int) canvas.getY(), (int) canvas.getWidth(), (int) canvas.getHeight(),
-                         sx, sy, sw, sh);
+            g.drawImage (skin, dst.getX(), dst.getY(), dst.getWidth(), dst.getHeight(), sx, sy, sw, sh);
     }
     else
     {
-        g.setGradientFill (ColourGradient (accent.withAlpha (0.45f), canvas.getCentreX(), canvas.getBottom(),
-                                           Colour (0xff050505), canvas.getCentreX(), canvas.getY(), false));
-        g.fillRect (canvas);
         g.setColour (Colours::white.withAlpha (0.5f));
         g.setFont (Font (18.0f, Font::bold));
         g.drawText ("Drop .png / .jpg / .gif skins into Documents\\ChicagoBeatsVisualizer\\skins",
@@ -289,7 +326,7 @@ void CBEditor::drawCanvas (Graphics& g, bool vfx)
 
     if (vfx)
     {
-        g.setColour (accent.withAlpha (bassEnv * 0.18f));       // bass pulse wash
+        g.setColour (accent.withAlpha (bassEnv * 0.18f));   // bass pulse wash
         g.fillRect (canvas);
 
         if (showMatrix)
@@ -299,6 +336,7 @@ void CBEditor::drawCanvas (Graphics& g, bool vfx)
             for (int i = 0; i < numCols; ++i)
             {
                 const float x = canvas.getX() + i * 14.0f;
+                if (x > canvas.getRight()) break;
                 for (int k = 0; k < cols[i].len; ++k)
                 {
                     const float y = canvas.getY() + cols[i].y - k * 14.0f;
@@ -323,17 +361,18 @@ void CBEditor::drawCanvas (Graphics& g, bool vfx)
             }
     }
 
-    // spectrum bars along the bottom of the canvas (always live)
+    // spectrum bars along the bottom of the screen (always live)
     const float bw = canvas.getWidth() / numBands;
     for (int b = 0; b < numBands; ++b)
     {
-        const float h = bands[b] * canvas.getHeight() * 0.45f;
+        const float h = bands[b] * canvas.getHeight() * 0.40f;
         const float x = canvas.getX() + b * bw;
         g.setColour (accent.withAlpha (0.85f));
         g.fillRect (x + 1.0f, canvas.getBottom() - h, bw - 2.0f, h);
         g.setColour (Colours::white);
         g.fillRect (x + 1.0f, canvas.getBottom() - h, bw - 2.0f, 2.0f);
     }
+
     if (showCar) drawCar (g);
     g.restoreState();
 
@@ -350,6 +389,7 @@ void CBEditor::drawCanvas (Graphics& g, bool vfx)
     chip (chipStars,  "STARS",  showStars);
     chip (chipCar,    "CAR",    showCar);
     chip (chipWarp,   "WARP",   showWarp);
+    chip (chipFit,    fitMode == 0 ? "FIT" : (fitMode == 1 ? "FILL" : "STRETCH"), true);
 }
 
 // Side-view Batmobile. The front end lifts on every kick (hydraulic bounce) while
@@ -357,14 +397,15 @@ void CBEditor::drawCanvas (Graphics& g, bool vfx)
 // underglow pulses; dust puffs on each landing.
 void CBEditor::drawCar (Graphics& g)
 {
-    const float carS = 0.9f;
-    const float gx = canvas.getCentreX(), gy = canvas.getBottom() - 24.0f;
-    const float lift = carLift * 14.0f;
+    const float carS = carScale();
+    const float u = carS / 0.9f;
+    const float gx = canvas.getCentreX(), gy = canvas.getBottom() - 24.0f * carS;
+    const float lift = carLift * 14.0f * u;
     const float glow = 0.35f + 0.65f * bassEnv;
 
     g.setGradientFill (ColourGradient (accent.withAlpha (glow * 0.7f), gx, gy,
-                                       Colours::transparentBlack, gx + 190.0f, gy, true));
-    g.fillEllipse (gx - 190.0f, gy - 14.0f, 380.0f, 28.0f);               // underglow
+                                       Colours::transparentBlack, gx + 190.0f * u, gy, true));
+    g.fillEllipse (gx - 190.0f * u, gy - 14.0f * u, 380.0f * u, 28.0f * u);          // underglow
 
     g.saveState();
     const float pivotX = gx - 100.0f * carS;                              // rear contact patch
@@ -449,33 +490,18 @@ void CBEditor::drawFrame (Graphics& g)
 {
     const auto outer = canvas.expanded (14.0f);
     const float glow = 0.35f + 0.65f * bassEnv;
-    for (int i = 4; i >= 1; --i)                                // soft red glow
+    for (int i = 4; i >= 1; --i)                                // soft glow
     {
         g.setColour (accent.withAlpha (glow * 0.08f * (float) (5 - i)));
         g.drawRoundedRectangle (outer.expanded ((float) i * 2.0f), 26.0f, 3.0f);
     }
-    g.setColour (Colour (0xff050505));
+    g.setColour (Colour (0xff050505));                          // black band + silver pinstripes
     g.drawRoundedRectangle (outer, 24.0f, 12.0f);
     g.setColour (Colour (0xffd8d8d8));
     g.drawRoundedRectangle (outer.expanded (6.0f), 30.0f, 1.4f);
     g.drawRoundedRectangle (outer.reduced (6.0f), 18.0f, 1.0f);
     g.setColour (accent.withAlpha (glow));
     g.drawRoundedRectangle (canvas.expanded (3.0f), 20.0f, 2.0f);
-
-    // title plate + crown
-    const Rectangle<float> plate (368.0f, 78.0f, 543.0f, 76.0f);
-    pinstripe (g, plate, 14.0f);
-
-    g.setFont (Font ("Georgia", 46.0f, Font::bold | Font::italic));
-    g.setColour (Colours::white);
-    g.drawText ("Chicago", Rectangle<int> (384, 78, 250, 56), Justification::centredRight);
-    g.setColour (accent);
-    g.drawText (" Beats", Rectangle<int> (634, 78, 260, 56), Justification::centredLeft);
-    g.setFont (Font (15.0f, Font::bold));
-    g.setColour (Colours::white);
-    g.drawText ("VISUALIZER", Rectangle<int> (368, 130, 543, 22), Justification::centred);
-
-    drawCrown (g, 560.0f, 6.0f, 160.0f, 68.0f, accent);
 }
 
 void CBEditor::pinstripe (Graphics& g, Rectangle<float> r, float radius)
@@ -537,13 +563,10 @@ void CBEditor::drawWoofer (Graphics& g, Point<float> c, float r, float exc)
     g.strokePath (arc, PathStrokeType (1.3f));
 }
 
-// Tall two-woofer tower (black cabinet, silver pinstripes), tilted outward.
-void CBEditor::drawTower (Graphics& g, Point<float> c, float w, float h, float tiltDeg, float exc, float shake)
+// Tall three-woofer tower (black cabinet, silver pinstripes). Straight, not tilted.
+void CBEditor::drawTower (Graphics& g, Point<float> c, float w, float h, float exc, float shake)
 {
     c += { (rng.nextFloat() - 0.5f) * shake, (rng.nextFloat() - 0.5f) * shake };
-
-    g.saveState();
-    g.addTransform (AffineTransform::rotation (degreesToRadians (tiltDeg), c.x, c.y));
 
     const Rectangle<float> cab (c.x - w * 0.5f, c.y - h * 0.5f, w, h);
     const float led = 0.25f + 0.75f * bassEnv;
@@ -555,18 +578,16 @@ void CBEditor::drawTower (Graphics& g, Point<float> c, float w, float h, float t
     pinstripe (g, cab, 14.0f);
 
     const float r = w * 0.40f;
-    drawWoofer (g, { c.x, cab.getY() + h * 0.27f }, r, exc);
-    drawWoofer (g, { c.x, cab.getY() + h * 0.70f }, r, exc);
+    for (float f : { 0.20f, 0.49f, 0.78f })
+        drawWoofer (g, { c.x, cab.getY() + h * f }, r, exc);
 
-    const Rectangle<float> plate (c.x - 34.0f, cab.getBottom() - 30.0f, 68.0f, 14.0f);
+    const Rectangle<float> plate (c.x - 40.0f, cab.getBottom() - 34.0f, 80.0f, 16.0f);
     g.setColour (Colour (0xff0a0a0a));
     g.fillRoundedRectangle (plate, 3.0f);
     g.setColour (Colour (0xffd8d8d8));
     g.drawRoundedRectangle (plate, 3.0f, 1.0f);
-    g.setFont (Font (8.0f, Font::bold));
+    g.setFont (Font (9.0f, Font::bold));
     g.drawText ("CHICAGO BEATS", plate, Justification::centred);
-
-    g.restoreState();
 }
 
 void CBEditor::drawButton (Graphics& g, Rectangle<float> r, const String& t, bool on)
@@ -581,90 +602,56 @@ void CBEditor::drawButton (Graphics& g, Rectangle<float> r, const String& t, boo
 
 void CBEditor::drawPanels (Graphics& g)
 {
-    const Rectangle<float> left (10, 452, 162, 224), right (1108, 452, 162, 224);
-    pinstripe (g, left, 10.0f);
-    pinstripe (g, right, 10.0f);
+    pinstripe (g, strip, 10.0f);
 
-    auto label = [&] (const String& t, Rectangle<float> r)
-    {
-        g.setColour (Colours::white);
-        g.setFont (Font (13.0f, Font::bold));
-        g.drawText (t, r, Justification::centred);
-    };
+    static const char* names[7] = { "MOTION VFX", "DB METER", "SPECTRUM", "SKIN", "RANDOM", "SIZE", "SCREEN" };
+    g.setFont (Font (10.0f, Font::bold));
+    g.setColour (Colours::white);
+    for (int i = 0; i < 7; ++i)
+        g.drawText (names[i], Rectangle<float> (grp[i].getX() - 10.0f, stripY + 3.0f, grp[i].getWidth() + 20.0f, 13.0f),
+                    Justification::centred);
 
-    // left: Motion VFX / dB meter / spectrum
     const bool vfx = *proc.vfxOn;
-    label ("MOTION VFX", { 10, 455, 162, 16 });
     drawButton (g, btnOn, "ON", vfx);
     drawButton (g, btnOff, "OFF", ! vfx);
 
-    label ("DB METER", { 10, 507, 162, 14 });
-    const float meters[4] = { dispL, dispR, bass, treble };
+    const float meters[4] = { dispL, dispR, bass, treble };                // 4 horizontal segmented meters
     for (int m = 0; m < 4; ++m)
         for (int s = 0; s < 12; ++s)
         {
             const bool lit = jlimit (0.0f, 1.0f, meters[m]) * 12.0f > (float) s;
             g.setColour (lit ? (s >= 9 ? Colours::white : accent) : Colour (0xff1c1c1c));
-            g.fillRect (22.0f + m * 34.0f, 574.0f - s * 4.2f, 26.0f, 3.2f);
+            g.fillRect (rMeter.getX() + s * 6.67f, rMeter.getY() + m * 6.5f, 5.4f, 5.0f);
         }
 
-    label ("SPECTRUM", { 10, 580, 162, 14 });
-    for (int b = 0; b < 16; ++b)
+    for (int b = 0; b < 16; ++b)                                           // mini spectrum
     {
         float v = 0; for (int k = 0; k < 4; ++k) v = jmax (v, bands[b * 4 + k]);
-        const float h = v * 52.0f;
+        const float h = v * rSpec.getHeight();
         g.setColour (Colours::white);
-        g.fillRect (20.0f + b * 8.8f, 670.0f - h, 6.0f, h);
+        g.fillRect (rSpec.getX() + b * 5.6f, rSpec.getBottom() - h, 4.2f, h);
     }
 
-    // right: skin mode / randomizer / resize
-    label ("SKIN MODE", { 1108, 455, 162, 16 });
-    const Rectangle<float> thumb (1122, 473, 134, 40);
-    g.setColour (Colour (0xff151515));
-    g.fillRoundedRectangle (thumb, 4.0f);
-    if (skin.isValid())
-        g.drawImage (skin, (int) thumb.getX(), (int) thumb.getY(), (int) thumb.getWidth(), (int) thumb.getHeight(),
-                     0, 0, skin.getWidth(), skin.getHeight());
     drawButton (g, btnPrev, "<", false);
     drawButton (g, btnNext, ">", false);
 
-    label ("RANDOMIZER", { 1108, 547, 162, 14 });
-    g.setColour (Colour (0xfff0f0f0));
-    g.fillRoundedRectangle (btnDice, 8.0f);
+    g.setColour (Colour (0xfff0f0f0));                                     // randomizer dice
+    g.fillRoundedRectangle (btnDice, 6.0f);
     g.setColour (accent);
+    const float dw = btnDice.getWidth();
     for (auto d : { Point<float> (.25f, .25f), Point<float> (.75f, .25f), Point<float> (.5f, .5f),
                     Point<float> (.25f, .75f), Point<float> (.75f, .75f) })
-        g.fillEllipse (btnDice.getX() + d.x * 44.0f - 4.0f, btnDice.getY() + d.y * 44.0f - 4.0f, 8.0f, 8.0f);
+        g.fillEllipse (btnDice.getX() + d.x * dw - 3.0f, btnDice.getY() + d.y * dw - 3.0f, 6.0f, 6.0f);
 
-    label ("RESIZE INTERFACE", { 1108, 612, 162, 14 });
     drawButton (g, btnMinus, "-", false);
     drawButton (g, btnPlus, "+", false);
-}
-
-void CBEditor::drawTransport (Graphics& g)
-{
-    // decorative for now: the media transport arrives with the video/gif player milestone
-    const Rectangle<float> bar (270, 528, 740, 46);
-    pinstripe (g, bar, 10.0f);
-    g.setColour (Colours::white);
-    g.setFont (Font (17.0f, Font::bold));
-    g.drawText ("Chicago Beats", Rectangle<int> (300, 531, 260, 22), Justification::centredLeft);
-    g.setFont (Font (13.0f));
-    g.drawText ("Now Playing...", Rectangle<int> (300, 551, 260, 18), Justification::centredLeft);
-
-    g.setColour (accent);
-    g.fillEllipse (616.0f, 527.0f, 48.0f, 48.0f);
-    Path play; play.addTriangle (632.0f, 540.0f, 632.0f, 562.0f, 652.0f, 551.0f);
-    g.setColour (Colours::white); g.fillPath (play);
-    Path back, fwd;
-    back.addTriangle (600.0f, 551.0f, 612.0f, 543.0f, 612.0f, 559.0f);
-    fwd.addTriangle (680.0f, 543.0f, 680.0f, 559.0f, 692.0f, 551.0f);
-    g.setColour (accent); g.fillPath (back); g.fillPath (fwd);
+    drawButton (g, btnScaleMinus, "-", false);
+    drawButton (g, btnScalePlus, "+", false);
 }
 
 void CBEditor::drawKeyboard (Graphics& g)
 {
-    const float x0 = 180.0f, y0 = 590.0f, kw = 920.0f / 36.0f, kh = 86.0f;
+    const float x0 = canvas.getX(), y0 = kbY, kw = canvas.getWidth() / 36.0f, kh = kbH;
     int wi = 0;
     for (int n = 36; n <= 96; ++n)
         if (! isBlackKey (n))

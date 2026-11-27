@@ -13,7 +13,7 @@ public:
     void mouseDown (const MouseEvent&) override;
 
 private:
-    enum { numBands = 64, numCols = 56 };
+    enum { numBands = 64, numCols = 80 };
 
     struct Col  { float y = 0, speed = 5; int len = 10; };
     struct Star { Point<float> p, v; float life = 1; };
@@ -22,23 +22,25 @@ private:
     void timerCallback() override;
     void analyse();
     void resetCol (int i, bool scatter);
+    void layout();                       // positions the screen, controls and keyboard
 
     void loadSkinList();
     void stepSkin (int dir);
     void randomize();
-    void stepSize (float factor);
+    void stepSize (float factor);        // whole plugin window
+    void stepScreen (float delta);       // visualizer screen only
 
-    // drawing (all in a fixed 1280x720 design space, scaled at paint time)
+    // drawing (fixed 1280x720 design space, scaled at paint time)
     void drawCanvas (Graphics&, bool vfx);
     void drawFrame (Graphics&);
-    void drawTower (Graphics&, Point<float> c, float w, float h, float tiltDeg, float exc, float shake);
+    void drawTower (Graphics&, Point<float> c, float w, float h, float exc, float shake);
     void drawWoofer (Graphics&, Point<float> c, float r, float exc);
     void pinstripe (Graphics&, Rectangle<float>, float radius);
     void drawPanels (Graphics&);
     void drawCar (Graphics&);
-    void drawTransport (Graphics&);
     void drawKeyboard (Graphics&);
     void drawButton (Graphics&, Rectangle<float>, const String&, bool on);
+    float carScale() const { return 0.95f * canvas.getWidth() / 880.0f; }
 
     CBProcessor& proc;
     ComponentBoundsConstrainer constrainer;
@@ -66,14 +68,14 @@ private:
 
     Colour accent { 0xffff1a1a };
     bool showMatrix = true, showStars = true, showCar = true, showWarp = true;
-    Rectangle<float> chipMatrix { 262, 178, 58, 18 }, chipStars { 324, 178, 58, 18 },
-                     chipCar { 386, 178, 58, 18 },    chipWarp { 448, 178, 58, 18 };
+    int fitMode = 0;                     // 0 = FIT (whole picture), 1 = FILL (crop), 2 = STRETCH (exact)
 
-    // clickable areas (design space)
-    Rectangle<float> btnOn   { 18, 473, 70, 28 },   btnOff  { 94, 473, 70, 28 };
-    Rectangle<float> btnPrev { 1116, 518, 62, 26 }, btnNext { 1192, 518, 62, 26 };
-    Rectangle<float> btnDice { 1167, 562, 44, 44 };
-    Rectangle<float> btnMinus { 1116, 632, 62, 26 }, btnPlus { 1192, 632, 62, 26 };
+    // layout (design space), filled by layout()
+    float screenScale = 1.0f;
+    Rectangle<float> canvas, strip, rMeter, rSpec, grp[7];
+    float stripY = 0, kbY = 0, kbH = 0;
+    Rectangle<float> btnOn, btnOff, btnPrev, btnNext, btnDice, btnMinus, btnPlus, btnScaleMinus, btnScalePlus;
+    Rectangle<float> chipMatrix, chipStars, chipCar, chipWarp, chipFit;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (CBEditor)
 };
