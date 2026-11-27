@@ -100,6 +100,7 @@ void CBEditor::randomize()
     accent = Colour (palette[rng.nextInt (6)]);
     showMatrix = rng.nextBool();
     showStars  = rng.nextBool();
+    showWarp   = rng.nextBool();
     if (! showMatrix && ! showStars) showMatrix = true;
     loadSkinList();
     if (skins.size() > 1) stepSkin (1 + rng.nextInt (skins.size() - 1));
@@ -108,7 +109,11 @@ void CBEditor::randomize()
 void CBEditor::mouseDown (const MouseEvent& e)
 {
     const auto pt = e.position / scale;
-    if      (btnOn.contains (pt))    *proc.vfxOn = true;
+    if      (chipMatrix.contains (pt)) showMatrix = ! showMatrix;
+    else if (chipStars.contains (pt))  showStars  = ! showStars;
+    else if (chipCar.contains (pt))    showCar    = ! showCar;
+    else if (chipWarp.contains (pt))   showWarp   = ! showWarp;
+    else if (btnOn.contains (pt))    *proc.vfxOn = true;
     else if (btnOff.contains (pt))   *proc.vfxOn = false;
     else if (btnPrev.contains (pt))  stepSkin (-1);
     else if (btnNext.contains (pt))  stepSkin (1);
@@ -162,7 +167,31 @@ void CBEditor::timerCallback()
 {
     analyse();
 
-    if (*proc.vfxOn)
+    const bool vfxNow = *proc.vfxOn;
+    phase += 0.25f;
+    lastLift = carLift;
+    carLift = vfxNow ? jlimit (0.0f, 1.25f, coneX) : 0.0f;
+    if (vfxNow)
+    {
+        wheelAngle += 0.18f + bassEnv * 0.12f;
+        if (showCar && lastLift > 0.35f && carLift < lastLift - 0.12f)      // front wheels landed
+            for (int i = 0; i < 5; ++i)
+            {
+                Dust d;
+                d.p = { canvas.getCentreX() + 90.0f + rng.nextFloat() * 20.0f, canvas.getBottom() - 24.0f };
+                d.v = { (rng.nextFloat() - 0.3f) * 3.0f, -rng.nextFloat() * 1.5f };
+                d.r = 4.0f + rng.nextFloat() * 4.0f;
+                dust.add (d);
+            }
+    }
+    for (int i = dust.size(); --i >= 0;)
+    {
+        auto& d = dust.getReference (i);
+        d.p += d.v;  d.v *= 0.95f;  d.r += 0.4f;  d.life -= 0.04f;
+        if (d.life <= 0.0f) dust.remove (i);
+    }
+
+    if (vfxNow)
     {
         if (showMatrix)
             for (int i = 0; i < numCols; ++i)
@@ -231,8 +260,21 @@ void CBEditor::drawCanvas (Graphics& g, bool vfx)
         int sw = skin.getWidth(), sh = skin.getHeight();
         if (ir > cr) sw = roundToInt (sh * cr); else sh = roundToInt (sw / cr);
         const int sx = (skin.getWidth() - sw) / 2, sy = (skin.getHeight() - sh) / 2;
-        g.drawImage (skin, (int) canvas.getX(), (int) canvas.getY(), (int) canvas.getWidth(), (int) canvas.getHeight(),
-                     sx, sy, sw, sh);
+        if (vfx && showWarp && bassEnv > 0.02f)       // picture bends and sways with the bass
+        {
+            const int N = 22, stripH = 15;            // 22 * 15 = 330 = canvas height
+            const int ex = 6 + (int) (14.0f * bassEnv);
+            for (int i = 0; i < N; ++i)
+            {
+                const int sy0 = sy + (i * sh) / N, sy1 = sy + ((i + 1) * sh) / N;
+                const int off = (int) (std::sin (phase + (float) i * 0.55f) * 7.0f * bassEnv);
+                g.drawImage (skin, (int) canvas.getX() - ex + off, (int) canvas.getY() + i * stripH,
+                             (int) canvas.getWidth() + 2 * ex, stripH, sx, sy0, sw, jmax (1, sy1 - sy0));
+            }
+        }
+        else
+            g.drawImage (skin, (int) canvas.getX(), (int) canvas.getY(), (int) canvas.getWidth(), (int) canvas.getHeight(),
+                         sx, sy, sw, sh);
     }
     else
     {
@@ -292,7 +334,115 @@ void CBEditor::drawCanvas (Graphics& g, bool vfx)
         g.setColour (Colours::white);
         g.fillRect (x + 1.0f, canvas.getBottom() - h, bw - 2.0f, 2.0f);
     }
+    if (showCar) drawCar (g);
     g.restoreState();
+
+    auto chip = [&] (Rectangle<float> r, const String& t, bool on)
+    {
+        g.setColour (on ? accent : Colour (0xcc050505));
+        g.fillRoundedRectangle (r, 4.0f);
+        g.setColour (on ? Colours::white : accent.withAlpha (0.7f));
+        g.drawRoundedRectangle (r.reduced (0.5f), 4.0f, 1.0f);
+        g.setFont (Font (10.0f, Font::bold));
+        g.drawText (t, r, Justification::centred);
+    };
+    chip (chipMatrix, "MATRIX", showMatrix);
+    chip (chipStars,  "STARS",  showStars);
+    chip (chipCar,    "CAR",    showCar);
+    chip (chipWarp,   "WARP",   showWarp);
+}
+
+// Side-view Batmobile. The front end lifts on every kick (hydraulic bounce) while
+// the rear wheels stay planted; chrome 5-spoke spinners keep turning; red
+// underglow pulses; dust puffs on each landing.
+void CBEditor::drawCar (Graphics& g)
+{
+    const float carS = 0.9f;
+    const float gx = canvas.getCentreX(), gy = canvas.getBottom() - 24.0f;
+    const float lift = carLift * 14.0f;
+    const float glow = 0.35f + 0.65f * bassEnv;
+
+    g.setGradientFill (ColourGradient (accent.withAlpha (glow * 0.7f), gx, gy,
+                                       Colours::transparentBlack, gx + 190.0f, gy, true));
+    g.fillEllipse (gx - 190.0f, gy - 14.0f, 380.0f, 28.0f);               // underglow
+
+    g.saveState();
+    const float pivotX = gx - 100.0f * carS;                              // rear contact patch
+    const float ang = -std::atan2 (lift, 200.0f * carS);                  // nose rises, rear stays down
+    g.addTransform (AffineTransform::scale (carS).translated (gx, gy).rotated (ang, pivotX, gy));
+
+    Path body;
+    body.startNewSubPath (-160.0f, -24.0f);
+    body.lineTo (-170.0f, -62.0f);
+    body.lineTo (-128.0f, -48.0f);
+    body.lineTo (-95.0f, -62.0f);
+    body.lineTo (-40.0f, -70.0f);
+    body.lineTo (-5.0f, -73.0f);
+    body.lineTo (32.0f, -58.0f);
+    body.lineTo (112.0f, -44.0f);
+    body.lineTo (176.0f, -30.0f);
+    body.lineTo (150.0f, -17.0f);
+    body.lineTo (60.0f, -14.0f);
+    body.lineTo (-60.0f, -14.0f);
+    body.closeSubPath();
+    body = body.createPathWithRoundedCorners (10.0f);
+
+    ColourGradient paint (Colour (0xff4a4a4a), 0.0f, -73.0f, Colour (0xff010101), 0.0f, -14.0f, false);
+    paint.addColour (0.25, Colour (0xff101010));
+    g.setGradientFill (paint);
+    g.fillPath (body);
+    g.setColour (Colours::white.withAlpha (0.45f));
+    g.strokePath (body, PathStrokeType (1.2f));
+
+    Path glass;                                                           // canopy
+    glass.addQuadrilateral (-34.0f, -66.0f, 0.0f, -69.0f, 26.0f, -56.0f, -42.0f, -58.0f);
+    g.setColour (Colour (0xff5fb8c4).withAlpha (0.55f));
+    g.fillPath (glass);
+
+    g.setColour (Colour (0xffff2a2a).withAlpha (0.55f + 0.45f * bassEnv)); // four red side slits
+    for (int i = 0; i < 4; ++i)
+    {
+        const float x = -80.0f + (float) i * 16.0f;
+        Path slit;
+        slit.addQuadrilateral (x, -44.0f, x + 8.0f, -44.0f, x + 4.0f, -30.0f, x - 4.0f, -30.0f);
+        g.fillPath (slit);
+    }
+
+    g.setColour (Colour (0xff9fd8ff).withAlpha (0.35f));                  // headlight + glow
+    g.fillEllipse (133.0f, -42.0f, 44.0f, 16.0f);
+    Path hl;
+    hl.addQuadrilateral (128.0f, -34.0f, 162.0f, -33.0f, 162.0f, -30.0f, 130.0f, -31.0f);
+    g.setColour (Colours::white);
+    g.fillPath (hl);
+
+    for (float wx : { -100.0f, 100.0f })                                  // chrome 5-spoke spinners
+    {
+        const float wy = -26.0f;
+        g.setColour (Colours::black);
+        g.fillEllipse (wx - 30.0f, wy - 30.0f, 60.0f, 60.0f);             // wheel arch
+        g.setColour (Colour (0xff0a0a0a));
+        g.fillEllipse (wx - 26.0f, wy - 26.0f, 52.0f, 52.0f);             // tyre
+        g.setGradientFill (ColourGradient (Colour (0xfff5f5f5), wx - 20.0f, wy - 20.0f,
+                                           Colour (0xff555555), wx + 20.0f, wy + 20.0f, false));
+        g.fillEllipse (wx - 20.0f, wy - 20.0f, 40.0f, 40.0f);             // rim
+        g.setColour (Colour (0xff0d0d0d));
+        g.fillEllipse (wx - 15.0f, wy - 15.0f, 30.0f, 30.0f);
+        g.setColour (Colour (0xffe6e6e6));
+        for (int k = 0; k < 5; ++k)
+        {
+            const float a = wheelAngle + (float) k * MathConstants<float>::twoPi / 5.0f;
+            g.drawLine (wx + std::cos (a) * 3.0f,  wy + std::sin (a) * 3.0f,
+                        wx + std::cos (a) * 17.0f, wy + std::sin (a) * 17.0f, 4.5f);
+        }
+        g.fillEllipse (wx - 5.0f, wy - 5.0f, 10.0f, 10.0f);               // hub
+    }
+    g.restoreState();
+
+    for (auto& d : dust)                                                  // landing puffs
+    {
+        g.setColour (Colour (0xffbbbbbb).withAlpha (d.life * 0.35f));
+        g.fillEllipse (d.p.x - d.r, d.p.y - d.r, 2.0f * d.r, 2.0f * d.r);
+    }
 }
 
 void CBEditor::drawFrame (Graphics& g)

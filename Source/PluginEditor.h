@@ -17,6 +17,7 @@ private:
 
     struct Col  { float y = 0, speed = 5; int len = 10; };
     struct Star { Point<float> p, v; float life = 1; };
+    struct Dust { Point<float> p, v; float life = 1, r = 6; };
 
     void timerCallback() override;
     void analyse();
@@ -34,6 +35,7 @@ private:
     void drawWoofer (Graphics&, Point<float> c, float r, float exc);
     void pinstripe (Graphics&, Rectangle<float>, float radius);
     void drawPanels (Graphics&);
+    void drawCar (Graphics&);
     void drawTransport (Graphics&);
     void drawKeyboard (Graphics&);
     void drawButton (Graphics&, Rectangle<float>, const String&, bool on);
@@ -53,6 +55,8 @@ private:
 
     Col cols[numCols];
     Array<Star> stars;
+    Array<Dust> dust;
+    float wheelAngle = 0, phase = 0, carLift = 0, lastLift = 0;
     Random rng;
 
     File skinFolder;
@@ -61,7 +65,9 @@ private:
     Image skin;
 
     Colour accent { 0xffff1a1a };
-    bool showMatrix = true, showStars = true;
+    bool showMatrix = true, showStars = true, showCar = true, showWarp = true;
+    Rectangle<float> chipMatrix { 262, 178, 58, 18 }, chipStars { 324, 178, 58, 18 },
+                     chipCar { 386, 178, 58, 18 },    chipWarp { 448, 178, 58, 18 };
 
     // clickable areas (design space)
     Rectangle<float> btnOn   { 18, 473, 70, 28 },   btnOff  { 94, 473, 70, 28 };
